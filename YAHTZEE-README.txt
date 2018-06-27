@@ -11,7 +11,7 @@ and place them in the same directory.
 
 Then CD into that directory you have created.
 
-Then type:  (load "text-based-yahtzee.txt") 
+After opening a Racket or Scheme compiler,  type:  (load "text-based-yahtzee.txt") 
 
 And follow the directions printed in the Interactions Window.
 

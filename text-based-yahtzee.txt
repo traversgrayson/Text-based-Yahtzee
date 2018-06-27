@@ -1,0 +1,145 @@
+;;;=====================
+;;;CMPU-101, Spring 2016
+;;;Assignment 9
+;;;Travers Parsons-Grayson
+;;;Grace Kirkpatrick
+;;; May 15, 2016
+;;;=====================
+
+(load "yahtzee.txt")
+
+(define show-yahtzee
+  (lambda (y)
+    ;; YAHTZEE:  state, num-rolls-left, dice, saved-dice, scoresheet
+    (cond 
+      ((not (= (yahtzee-state y) *game-over*))
+       (printf "~%------------------------------~%")
+       (printf "          YAHTZEE!~%")
+       (printf "------------------------------~%"))
+      (else
+       (printf "~%~%------------------------------")
+       (printf "~%         GAME OVER!")
+       ))
+    ;; Print the following when the STATE of the game is not *GAME-OVER*
+    (when (not (= (yahtzee-state y) *game-over*))
+      ;;prints out saved dice in terms of #t and #f
+      (let ((boolean-saved (vector #f #f #f #f #f)))
+      (dotimes (i 5)
+             (when (= (vector-ref (yahtzee-saved-dice y) i) *kept-dice*)
+               (vector-set! boolean-saved i #t)))
+         (printf " Number of rolls left: ~A, dice: ~A saved-dice: ~A " 
+              (yahtzee-num-rolls-left y) (vector->list (yahtzee-dice y)) (vector->list boolean-saved)))
+      ;; Print the following when the STATE of the game is not *GAME-OVER* and NUM-ROLLS-LEFT < 3
+      (when (< (yahtzee-num-rolls-left y) 3)
+        (printf "~%----------------------------~%")
+        (printf "Available Categories---Potential Score~%")
+        (printf "------------------------------~%")
+        (dotimes (i 14)
+                 (when (not (number? (vector-ref (yahtzee-scoresheet y) i)))
+                   (when (and (> i 0) (< i 7))
+                     (printf "~A: ~A  " i (sum-for-cat (yahtzee-dice y) i)))
+                   (when (= i 7)
+                     (printf "~%7: Three of a kind ~A     "
+                             (if (has-three-of-a-kind? (yahtzee-dice y))
+                                 (sum-all-dice (yahtzee-dice y))
+                                 0)))
+                   (when (= i 8)
+                     (printf "8: Four of a kind ~A     "
+                             (if (has-four-of-a-kind? (yahtzee-dice y))
+                                 (sum-all-dice (yahtzee-dice y))
+                                 0)))
+                   (when (= i 9)
+                     (printf "~%9: Full House ~A          "
+                             (if (has-full-house? (yahtzee-dice y))
+                                 25
+                                 0)))
+                   (when (= i 10)
+                     (printf "10: Small straight ~A     "
+                             (if (has-small-straight? (yahtzee-dice y))
+                                 30
+                                 0)))
+                   (when (= i 11)
+                     (printf "~%11: Large straight ~A     "
+                             (if (has-large-straight? (yahtzee-dice y))
+                                 40
+                                 0)))
+                   (when (= i 12)
+                     (printf "12: Chance ~A     " (yahtzee-chance y)))
+                   (when (= i 13)
+                     (printf "~%13: Yahtzee ~A  "
+                             (if (has-yahtzee? (yahtzee-dice y))
+                                 50
+                                 0)))))))
+    ;;Print out the scoresheet at tbe end of the game or when NUM-ROLLS-LEFT = 3
+    (when (or (= (yahtzee-state y) *game-over*) (= (yahtzee-num-rolls-left y) 3))
+      (printf "~%------------------------------")
+      (printf "~%         SCORESHEET")
+      (printf "~%------------------------------~%")
+      (dotimes (i 14)
+               (when (and (> i 0) (< i 7))
+                 (printf "~A: ~A  " i (vector-ref (yahtzee-scoresheet y) i)))
+               (when (= i 7)
+                 (printf"~%Sum: ~A  " (yahtzee-sum y))
+                 (printf "Bonus: ~A" (yahtzee-bonus y)))
+               (when (= i 7)
+                 (printf "~%Three of a kind: ~A  " (vector-ref (yahtzee-scoresheet y) i)))
+               (when (= i 8)
+                 (printf "Four of a kind: ~A  " (vector-ref (yahtzee-scoresheet y) i)))
+               (when (= i 9)
+                 (printf "~%Full House: ~A  " (vector-ref (yahtzee-scoresheet y) i)))
+               (when (= i 10)
+                 (printf "Small straight: ~A  " (vector-ref (yahtzee-scoresheet y) i)))
+               (when (= i 11)
+                 (printf "~%Large straight: ~A  " (vector-ref (yahtzee-scoresheet y) i)))
+               (when (= i 12)
+                 (printf "Chance: ~A  " (vector-ref (yahtzee-scoresheet y) i)))
+               (when (= i 13)
+                 (printf "Yahtzee: ~A  " (vector-ref (yahtzee-scoresheet y) i))))
+      (printf "~%Total Score: ~A" (yahtzee-total y)))
+    ;;Instructions for the game 
+    (printf "~%------------------------------")
+    (printf "~%        INSTRUCTIONS")
+    (printf "~%------------------------------")
+    (cond
+      ;;NUM-ROLLS-LEFT = 3 and not *GAME-OVER*
+      ((and (= (yahtzee-num-rolls-left y) 3) (not (= (yahtzee-state y) *game-over*)))
+       (printf "~%==> Time to roll the dice: (roll-em! <game>)"))
+      ;;No rolls left and not *GAME-OVER*
+      ((and (= (yahtzee-num-rolls-left y) 0) (not (= (yahtzee-state y) *game-over*)))
+       (printf "~%Time to score: (score! <game>  <index of category> )~%")
+       (printf "The index of each category is shown under Potential Scores (1-13)")
+       (printf "~%EX: To score in three-of-a-kind category: (score y 7)"))
+      ;; NUM-ROLLS-LEFT <3 and =/ 0 and not *GAME-OVER*
+      ((and (< (yahtzee-num-rolls-left y) 3) (not (= (yahtzee-state y) *game-over*)))
+       (printf "~%==> You may roll, save dice, or score")
+       (printf "~%------------------------------")
+       (printf "~%To save or un-save a die: (toggle-save-die! <game> <list of die indexes>)")
+       (printf "~%------------------------------")
+       (printf "~%To roll the dice: (roll-em! <game>)")
+       (printf "~%------------------------------")
+       (printf "~%To score: (score! <game> <index of category>)")
+       (printf "~%------------------------------"))
+      ;; When the state of the game is *GAME-OVER*
+      (else
+       (printf "~%To start a new game:  (define y (new-game))")
+       (printf "~%Then:                 (show-yahtzee y)")))))
+
+;;Intial text to print at the beginning of the game
+(printf "======================================~%")
+(printf " Welcome to Text-Based Yahtzee!~%")
+(printf "======================================~%")
+(printf "To begin:  (define y (new-game))~%~%")
+(printf "Then:      (show-yahtzee y)~%")
+(printf "~%------------------------------")
+(printf "~%    INSTRUCTIONS FOR GAME")
+(printf "~%------------------------------")
+(printf "~%To save or un-save dice: (toggle-save-die! <game> <list of die indexes>)")
+(printf "~%EX: Dice: (1 4 5 6 2) Index: 0, 1, 2, 3, 4")
+(printf "~%Save the first and second die (1 4): (toggle-save-die! y '(0 1))~% ==> saved-dice: (#t #t #f #f #f)")
+(printf "~%------------------------------")
+(printf "~%To roll the dice: (roll-em! <game>)")
+(printf "~%------------------------------")
+(printf "~%To score: (score! <game>  <index of category> )~%")
+(printf "The index of each category is shown under 'Potential Scores'")
+(printf "~%EX: To score in three-of-a-kind: (score! y 7)")
+(printf "~%------------------------------")

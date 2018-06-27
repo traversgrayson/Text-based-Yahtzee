@@ -1,0 +1,481 @@
+;;;=====================
+;;;CMPU-101, Spring 2016
+;;;Assignment 9 (Yahtzee)
+;;;Travers Parsons-Grayson
+;;;=====================
+
+;;;------
+;;;MODEL
+;;;------
+(define *waiting-to-roll* 0)
+(define *waiting-to-score* 1)
+(define *game-over* 2)
+(define *unfilled* 'x)
+
+(define-struct yahtzee
+  (;;STATE, one of *WAITING-TO-ROLL*, etc.
+   state
+   ;;NUM-ROLLS-LEFT: 1, 2, or 3
+   num-rolls-left
+   ;;DICE (vector)
+   dice
+   ;;SAVED-DICE (vector)
+   saved-dice
+   ;;SCORESHEET (vector)
+   scoresheet
+   ;;OPEN-CATEGORIES
+   open-categories
+   ;;CHANCE, a number between 5 and 30
+   chance
+   ;;SUM, sum of first six categories
+   sum
+   ;;BONUS, for getting over 63 points in first six categories
+   bonus
+   ;;TOTAL, total game score
+   total
+   ))
+
+(define make-yahtzee-wr
+  (lambda ()
+    (let* ((scores (make-vector 14))
+           (len (vector-length scores))
+           (open-categories (- len 1)))
+      (dotimes (i len)
+               (vector-set! scores i *unfilled*))
+      (make-yahtzee *waiting-to-roll* ;; intial state
+                    3 ;; intial rolls left
+                    (make-vector 5) ;; vector of dice
+                    (make-vector 5) ;; vector of saved-dice
+                    scores
+                    open-categories; vector of categories
+                    0 ;; intial CHANCE score
+                    0 ;; intial SUM score
+                    0 ;; intial BONUS score
+                    0 ;; intial TOTAL score
+                    ))))
+
+;;;NEW-GAME! FUNCTION
+(define new-game
+  (lambda ()
+    (make-yahtzee-wr)))
+
+;;;------
+;;;CONTROLLER
+;;;------
+(define toss-die
+  (lambda ()
+    (+ 1 (random 6))))
+
+(define *kept-dice* 1)
+(define *non-saved-dice* 0)
+
+;;;==================
+;;;SAVE-DIE!
+;;;==================
+;;;INPUTS: YAHTZ, a yahtzee data structure
+;;;        listy, list of indexes of the dice to be saved
+;;;OUTPUT: None
+;;;SIDE EFFECT: destructively modifies the SAVED-DICE vector
+;;;=========================================================
+
+(define toggle-save-die!
+  (lambda (yahtz listy)
+    (cond
+      ;;LISTY is empty
+      ((null? listy)
+       (newline))
+      ;;STATE of the game is *WAITING-TO-ROLL* and NUM-ROLLS-LEFT < 3, and die is non-saved
+      ((and (= (yahtzee-state yahtz) *waiting-to-roll*)
+            (< (yahtzee-num-rolls-left yahtz) 3)
+            (= (vector-ref (yahtzee-saved-dice yahtz) (first listy)) *non-saved-dice*))
+       (vector-set! (yahtzee-saved-dice yahtz) (first listy) *kept-dice*)
+       (toggle-save-die! yahtz (rest listy)))
+      ;;;STATE of the game is *WAITING-TO-ROLL* and NUM-ROLLS-LEFT < 3, and die is saved
+      ((and (= (yahtzee-state yahtz) *waiting-to-roll*)
+            (< (yahtzee-num-rolls-left yahtz) 3)
+            (= (vector-ref (yahtzee-saved-dice yahtz) (first listy)) *kept-dice*))
+       (vector-set! (yahtzee-saved-dice yahtz) (first listy) *non-saved-dice*)
+       (toggle-save-die! yahtz (rest listy)))
+      ;;STATE of the game is anything else
+      (else
+       (printf "Cannot save dice at this time!~%")))))
+
+
+
+;;;==================
+;;;ROLL-EM!
+;;;==================
+;;;INPUTS: YAHTZ, a yahtzee data structure
+;;;OUTPUT: None
+;;;SIDE EFFECT: destructively modifies the DICE vector
+;;; creates new random entries for five dice slots unless
+;;; the SAVED-DICE vector specifies the die should be saved
+;;;=========================================================
+
+(define roll-em!
+  (lambda (yahtz)
+    (cond
+      ;;STATE is *WAITING-TO-SCORE* or *GAME-OVER*
+      ((or (= (yahtzee-state yahtz) *waiting-to-score*)
+           (= (yahtzee-state yahtz) *game-over*))
+       (printf "~%Cannot roll at this time"))
+      ;;Good time to roll
+      ;;rolls dice if they have not been told to be saved
+      (else
+       (let* ((dices (yahtzee-dice yahtz))
+              (len (vector-length dices)))
+         (dotimes (i len)
+                  (when  (= (vector-ref (yahtzee-saved-dice yahtz) i) *non-saved-dice*)
+                    (vector-set! dices i (toss-die))))
+         ;; Decrement num-rolls-left
+         (set-yahtzee-num-rolls-left! yahtz
+                                      (- (yahtzee-num-rolls-left yahtz) 1))
+         ;;When NUM-ROLLS-LEFT = 0 change STATE to *WAITING-TO-SCORE*
+         (when (= (yahtzee-num-rolls-left yahtz) 0)
+           (set-yahtzee-state! yahtz *waiting-to-score*))
+         ;; Create a new value for CHANCE
+         (when (eq? (vector-ref (yahtzee-scoresheet yahtz) *chance* ) *unfilled*)
+           (set! (yahtzee-chance yahtz) (+ (toss-die)
+                                           (toss-die)
+                                           (toss-die)
+                                           (toss-die)
+                                           (toss-die))))
+         )))))
+
+;;======================
+;;  SUM-FOR-CAT
+;; =====================
+;;  INPUTS:  DICE, vector of dice
+;;           CAT, a number from 1 to 6
+;;  OUTPUT:  The sum of the dice that match CAT.
+
+(define sum-for-cat
+  (lambda (dice cat)
+    ;; ACC is a local variable whose value will be DESTRUCTIVELY
+    ;; MODIFIED within the body of the DOTIMES!
+    (let ((acc 0))
+      (dotimes (i (vector-length dice))
+               (when (= (vector-ref dice i) cat)
+                 ;; Here's where we destructively modify ACC
+                 (set! acc (+ acc cat))))
+      ;; return the accumulated score
+      acc)))
+
+;;======================
+;;  SUM-ALL-DICE
+;; =====================
+;;  INPUTS:  DICE, vector of dice
+;;           
+;;  OUTPUT: The sum of all dice in DICE
+
+(define sum-all-dice
+  (lambda (dice)
+    ;; ACC is a local variable whose value will be DESTRUCTIVELY
+    ;; MODIFIED within the body of the DOTIMES!
+    (let ((acc 0))
+      (dotimes (i (vector-length dice))
+               (set! acc (+ acc (vector-ref dice i))))
+      ;; return the accumulated score
+      acc)))
+
+
+;;;  COMPUTE-HISTOGRAM
+;;; --------------------------------------------
+;;;  INPUT:  VECK-O-DICE, a vector of dice (valued 1 thru 6)
+;;;  OUTPUT:  A vector of length 7, where the ith slot contains
+;;;    the number of occurrences of i in the VECK-O-DICE.
+;;;    Note that the 0th slot of the histogram is ignored.
+
+(define compute-histogram
+  (lambda (veck-o-dice)
+    (let* ((histy (make-vector 7))
+           (len (vector-length veck-o-dice)))
+      (dotimes (i len)
+               (vector-set! histy (vector-ref veck-o-dice i)
+                            (+ 1 (vector-ref histy (vector-ref veck-o-dice i)))))
+      histy)))
+
+;;;  HAS-THREE-OF-A-KIND?
+;;; ---------------------------------------------
+;;;  INPUT:  VECK-O-DICE
+;;;  OUTPUT:  #t if the vector of dice contains at least 3 of one kind
+;;;           #f otherwise.
+
+(define has-three-of-a-kind?-helper
+  (lambda (veck-o-dice i)
+    (let* ((histy (compute-histogram veck-o-dice))
+           (len (vector-length histy)))
+      (cond
+        ;;BASE CASE 1: end of vector
+        ((>= i len)
+         #f)
+        ;;BASE CASE 2: Found three of a kind
+        ((>= (vector-ref histy i) 3)
+         #t)
+        ;;Recursive Case
+        (else
+         (has-three-of-a-kind?-helper veck-o-dice (+ i 1)))))))
+
+(define has-three-of-a-kind?
+  (lambda (veck-o-dice)
+    (has-three-of-a-kind?-helper veck-o-dice 1)))
+
+;;;  HAS-FOUR-OF-A-KIND?
+;;; ---------------------------------------------
+;;;  INPUT:  VECK-O-DICE
+;;;  OUTPUT:  #t if the vector of dice contains at least 4 of one kind
+;;;           #f otherwise.
+
+(define has-four-of-a-kind?-helper
+  (lambda (veck-o-dice i)
+    (let* ((histy (compute-histogram veck-o-dice))
+           (len (vector-length histy)))
+      (cond
+        ;;BASE CASE 1:end of vector
+        ((>= i len)
+         #f)
+        ;;BASE CASE 2: Found four of a kind
+        ((>= (vector-ref histy i) 4)
+         #t)
+        ;;Recursive Case
+        (else
+         (has-four-of-a-kind?-helper veck-o-dice (+ i 1)))))))
+
+(define has-four-of-a-kind?
+  (lambda (veck-o-dice)
+    (has-four-of-a-kind?-helper veck-o-dice 1)))
+
+;;;  HAS-FULL-HOUSE?
+;;; ---------------------------------------------
+;;;  INPUT:  VECK-O-DICE
+;;;          I, a counting index
+;;;  OUTPUT:  returns #t if the set of dice contain
+;;;           three of one kind and two of another kind --- OR five
+;;;           of one kind; #f otherwise.
+
+(define has-full-house?-helper
+  (lambda (veck-o-dice i)
+    (let* ((histy (compute-histogram veck-o-dice))
+           (len (vector-length histy)))
+      (cond
+        ;;BASE CASE 1:end of vector
+        ((>= i len)
+         #t)
+        ;;BASE CASE 2: One number appears once
+        ((= (vector-ref histy i) 1)
+         #f)
+        ;;Recursive Case
+        (else
+         (has-full-house?-helper veck-o-dice (+ i 1)))))))
+
+(define has-full-house?
+  (lambda (veck-o-dice)
+    (has-full-house?-helper veck-o-dice 1)))
+
+;;;  HAS-YAHTZEE?
+;;; ---------------------------------------------
+;;;  INPUT:  VECK-O-DICE
+;;;  OUTPUT:   returns #t if the set of dice contain five
+;;;            of a kind; #f otherwise.
+
+(define has-yahtzee?-helper
+  (lambda (veck-o-dice i)
+    (let* ((histy (compute-histogram veck-o-dice))
+           (len (vector-length histy)))
+      (cond
+        ;;BASE CASE 1:end of vector
+        ((>= i len)
+         #f)
+        ;;BASE CASE 2: Found five of a kind
+        ((= (vector-ref histy i) 5)
+         #t)
+        ;;Recursive Case
+        (else
+         (has-yahtzee?-helper veck-o-dice (+ i 1)))))))
+
+(define has-yahtzee?
+  (lambda (veck-o-dice)
+    (has-yahtzee?-helper veck-o-dice 1)))
+
+;;;  HAS-SMALL-STRAIGHT?
+;;; ---------------------------------------------
+;;;  INPUT:  VECK-O-DICE
+;;;  OUTPUT:  #t if the vector of dice contains all of the
+;;;   numbers in {1,2,3,4} or {2,3,4,5} or (3,4,5,6) , in any order;
+;;;   #f otherwise.
+
+(define has-small-straight?
+  (lambda (veck-o-dice)
+    (let* ((histy (compute-histogram veck-o-dice))
+           )
+      (or (and (> (vector-ref histy 1) 0) 
+               (> (vector-ref histy 2) 0) 
+               (> (vector-ref histy 3) 0) 
+               (> (vector-ref histy 4) 0))
+          (and (> (vector-ref histy 2) 0) 
+               (> (vector-ref histy 3) 0) 
+               (> (vector-ref histy 4) 0) 
+               (> (vector-ref histy 5) 0))
+          (and (> (vector-ref histy 3) 0) 
+               (> (vector-ref histy 4) 0) 
+               (> (vector-ref histy 5) 0) 
+               (> (vector-ref histy 6) 0))))))
+
+;;;  HAS-LARGE-STRAIGHT?
+;;; ---------------------------------------------
+;;;  INPUT:  VECK-O-DICE
+;;;  OUTPUT:  #t if the vector of dice contains all of the
+;;;   numbers in {1,2,3,4,5} or {2,3,4,5,6}, in any order;
+;;;   #f otherwise.
+
+(define has-large-straight?
+  (lambda (veck-o-dice)
+    (let* ((histy (compute-histogram veck-o-dice))
+           )
+      (or (and (> (vector-ref histy 1) 0) 
+               (> (vector-ref histy 2) 0) 
+               (> (vector-ref histy 3) 0) 
+               (> (vector-ref histy 4) 0) 
+               (> (vector-ref histy 5) 0))
+          (and (> (vector-ref histy 2) 0) 
+               (> (vector-ref histy 3) 0) 
+               (> (vector-ref histy 4) 0) 
+               (> (vector-ref histy 5) 0) 
+               (> (vector-ref histy 6) 0))))))
+
+;;;==================
+;;;SCORE!
+;;;==================
+;;;INPUTS: YAHTZ, a yahtzee data structure
+;;;        CAT, a category to be scored in
+;;;OUTPUT: None
+;;;SIDE EFFECT: destructively modifies the SCORESHEET
+;;;  vector
+;;;=========================================================
+
+(define *three-of-a-kind* 7)
+(define *four-of-a-kind* 8)
+(define *full-house* 9)
+(define *small-straight* 10)
+(define *large-straight* 11)
+(define *chance* 12)
+(define *yahtzee* 13)
+
+(define score!
+  (lambda (yahtz cat)
+    (cond
+      ;;Bad time to score
+      ((or (= (yahtzee-num-rolls-left yahtz) 3)
+           (= (yahtzee-state yahtz) *game-over*))
+       (printf "Bad time to score!~%"))
+      ;;Trying to score in filler category
+      ((= cat 0)
+       (printf "Cannot score in the filler category"))
+      ;; Good time to score, but category is filled
+      ((number? (vector-ref (yahtzee-scoresheet yahtz) cat ))
+       (printf "Good time to score, but category is filled~%"))
+      ;;Score 
+      (else
+       ;;when cat <= 6 , score is SUM-FOR-CAT
+       (when (<= cat 6)
+         (vector-set! (yahtzee-scoresheet yahtz) 
+                      cat 
+                      (sum-for-cat (yahtzee-dice yahtz) cat)))
+       ;; when cat = *THREE-OF-A-KIND*
+       (when (= cat *three-of-a-kind*)
+         (if (has-three-of-a-kind? (yahtzee-dice yahtz))
+             (vector-set! (yahtzee-scoresheet yahtz) 
+                          cat 
+                          (sum-all-dice (yahtzee-dice yahtz)))
+             (vector-set! (yahtzee-scoresheet yahtz) 
+                          cat 
+                          0)))
+       ;; when cat = *FOUR-OF-A-KIND*
+       (when (= cat *four-of-a-kind*)
+         (if (has-four-of-a-kind? (yahtzee-dice yahtz))
+             (vector-set! (yahtzee-scoresheet yahtz) 
+                          cat 
+                          (sum-all-dice (yahtzee-dice yahtz)))
+             (vector-set! (yahtzee-scoresheet yahtz) 
+                          cat 
+                          0)))
+       ;; when cat = *FULL-HOUSE*
+       (when (= cat *full-house*)
+         (if (has-full-house? (yahtzee-dice yahtz))
+             (vector-set! (yahtzee-scoresheet yahtz) 
+                          cat 
+                          25)
+             (vector-set! (yahtzee-scoresheet yahtz) 
+                          cat 
+                          0)))
+       ;; WHEN CAT = *SMALL-STRAIGHT*
+       (when (= cat *small-straight*)
+         (if (has-small-straight? (yahtzee-dice yahtz))
+             (vector-set! (yahtzee-scoresheet yahtz) 
+                          cat 
+                          30)
+             (vector-set! (yahtzee-scoresheet yahtz) 
+                          cat 
+                          0)))
+       ;; WHEN CAT = *LARGE-STRAIGHT*
+       (when (= cat *large-straight*)
+         (if (has-large-straight? (yahtzee-dice yahtz))
+             (vector-set! (yahtzee-scoresheet yahtz) 
+                          cat 
+                          40)
+             (vector-set! (yahtzee-scoresheet yahtz) 
+                          cat 
+                          0)))
+       ;; WHEN CAT = *CHANCE*
+       (when (= cat *chance*)
+         (vector-set! (yahtzee-scoresheet yahtz) 
+                      cat 
+                      (yahtzee-chance yahtz)))
+       
+       ;; WHEN CAT = *YATZHEE*
+       (when (= cat *yahtzee*)
+         (if (has-yahtzee? (yahtzee-dice yahtz))
+             (vector-set! (yahtzee-scoresheet yahtz) 
+                          cat 
+                          50)
+             (vector-set! (yahtzee-scoresheet yahtz) 
+                          cat 
+                          0)))
+       
+       (set-yahtzee-saved-dice! yahtz (make-vector 5))
+       (set-yahtzee-num-rolls-left! yahtz 3)
+       (set-yahtzee-open-categories! yahtz (- (yahtzee-open-categories yahtz) 1))
+       ;;IF all categories are filled end the game, if not set the state
+       ;;to *WAITING-TO-ROLL*
+       (if (= (yahtzee-open-categories yahtz) 0)
+           (set-yahtzee-state! yahtz *game-over*)
+           (set-yahtzee-state! yahtz *waiting-to-roll*))
+       ;;See if you get the bonus
+       (let* ((sum-acc 0))
+         (dotimes (i 6)
+                  (when (number? (vector-ref (yahtzee-scoresheet yahtz) (+ i 1)))
+                    (set! sum-acc (+ sum-acc (vector-ref (yahtzee-scoresheet yahtz) (+ i 1)))))
+                  (set-yahtzee-sum! yahtz sum-acc)
+                  (when (>= sum-acc 63)
+                    (set-yahtzee-bonus! yahtz 35))))
+       ;; Calculate the total score
+       (let ((total-sum 0))
+         (dotimes (i 13)
+                  (when (number? (vector-ref (yahtzee-scoresheet yahtz) (+ i 1)))
+                    (set! total-sum (+ total-sum (vector-ref (yahtzee-scoresheet yahtz) (+ i 1))))))
+         ;;add the bonus
+         (set! total-sum (+ total-sum (yahtzee-bonus yahtz)))
+         (set-yahtzee-total! yahtz total-sum))
+       
+       ))))
+
+
+
+
+
+
+
+
+
+
+
